@@ -2,16 +2,21 @@
 Author: Sara Mathieson, Rebecca Riley
 Date 06/22/2023
 """
+import numpy as np
 import optparse
 
+from math import sqrt
+from ss_helpers import parse_output
 from ss_helpers import stats_all
-import util
+from util import process_opts
 
-NUM_TRIAL = 2
+NUM_TRIAL = 100
 
 def main():
     # setup --------------------------------------------------------------------
-    generator, iterator, parameters, sample_sizes, param_values = setup()
+    opts, param_values = parse_args() # also handles infile reading
+    generator, iterator, parameters, sample_sizes = process_opts(opts,
+        summary_stats=True)
     generator.update_params(param_values)
     print("VALUES", param_values)
     print("made it through params")
@@ -43,46 +48,28 @@ def main():
     def mse(truth, exp):
         return (truth - exp) ** 2
 
+    num_stats = len(real_stats_pop)
+    stat_error = np.zeros((num_stats))
 
-    # pop_sfs
-    sfs_error = 0
+    for i in range(num_stats):
+        truth_values = real_stats_pop[i]
+        exp_values = sim_stats_pop[i]
+        
+        for j in range(len(truth_values)):
+            if i == 0 or i == 2: # these are multi-layered
+                for k in range(len(truth_values[j])):
+                    stat_error[i] += mse(truth_values[j][k], exp_values[j][k])
+            else:
+                stat_error[i] += mse(truth_values[j], exp_values[j])
 
-    truth_sfs = real_stats_pop[0]
-    exp_sfs = sim_stats_pop[0]
-    num_sfs = len(truth_sfs)
+    result = ""
+    for i in range(num_stats):
+        # print(stat_error[i])
+        result = result + str(stat_error[i] / NUM_TRIAL) + "\t"
+    print(result)
 
-    for i in range(num_sfs):
-        for j in range(len(truth_sfs[i])):
-            sfs_error += mse(truth_sfs[i][j], exp_sfs[i][j])
-
-    # pop_dist
-    truth_pop_dist = real_stats_pop[1]
-    exp_pop_dist = sim_stats_pop[1]
-
-    print(sfs_error)
-    
-
-def setup():
-    opts = parse_args()
-    print("parsed args")
-
-    # load args
-    if opts.infile:
-        param_values, in_file_data = ss_helpers.parse_output(input_file)
-    else:
-        param_values = opts.param_values
-        in_file_data = None
-
-    opts, param_values = util.parse_args(in_file_data = in_file_data,
-        param_values=param_values)
-
-    print("parsing complete")
-
-    generator, iterator, parameters, sample_sizes = util.process_opts(opts,
-        summary_stats=True)
-
-    print("generator etc loaded")
-    return generator, iterator, parameters, sample_sizes, param_values
+    # complete_error = np.sum(stat_error)
+    # print(complete_error)
 
 def parse_args():
     parser = optparse.OptionParser(description='parsing sstat analysis args')
@@ -99,12 +86,50 @@ def parse_args():
         help='recombination maps')
     parser.add_option('-n', '--sample_sizes', type='string',
         help='comma separated sample sizes for each population, in haps')
+    parser.add_option('-s', '--seed', type='int', default=1833,
+        help='seed for RNG')
 
     parser.add_option('-v', '--param_values', type='string',
         help='comma separated values corresponding to params', default=None)
 
     (opts, args) = parser.parse_args()
-    return opts
+
+    if opts.infile is not None:
+        param_values_infile, in_file_data = parse_output(opts.infile)
+
+        if opts.model is None:
+            opts.model = in_file_data['model']
+
+        if opts.params is None:
+            opts.params = in_file_data['params']
+
+        if opts.data_h5 is None:
+            opts.data_h5 = in_file_data['data_h5']
+
+        if opts.bed is None:
+            opts.bed = in_file_data['bed_file']
+
+        if opts.sample_sizes is None:
+            opts.sample_sizes = in_file_data['sample_sizes']
+
+        if opts.reco_folder is None:
+            opts.reco_folder = in_file_data['reco_folder']
+
+    if opts.param_values is None:
+        param_values = param_values_infile
+    else:
+        arg_values = [float(val_str) for val_str in
+            opts.param_values.split(',')]
+        param_values = arg_values
+
+    mandatories = ['model','params','sample_sizes']
+    for m in mandatories:
+        if not opts.__dict__[m]:
+            print('mandatory option ' + m + ' is missing\n')
+            parser.print_help()
+            sys.exit()
+
+    return opts, param_values
 
 if __name__ == "__main__":
     main()
