@@ -322,4 +322,5 @@ def get_title_from_trial_data(opts, param_values, sample_sizes):
 
     return {"size": FONT_SIZE, "title": title}
 
-main()
+if __name__ == "__main__":
+    main()
