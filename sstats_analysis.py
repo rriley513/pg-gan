@@ -57,10 +57,14 @@ def main():
         
         for j in range(len(truth_values)):
             if i == 0 or i == 2: # these are multi-layered
-                for k in range(len(truth_values[j])):
-                    stat_error[i] += mse(truth_values[j][k], exp_values[j][k])
+                truth_values2 = np.sort(truth_values[j])
+                exp_values2 = np.sort(exp_values[j])
+                for k in range(len(truth_values2)):
+                    stat_error[i] += mse(truth_values2[k], exp_values2[k])
             else:
-                stat_error[i] += mse(truth_values[j], exp_values[j])
+                truth_values2 = np.sort(truth_values)
+                exp_values2 = np.sort(exp_values)
+                stat_error[i] += mse(truth_values2[j], exp_values2[j])
 
     result = ""
     for i in range(num_stats):
@@ -68,8 +72,8 @@ def main():
         result = result + str(stat_error[i] / NUM_TRIAL) + "\t"
     print(result)
 
-    # complete_error = np.sum(stat_error)
-    # print(complete_error)
+    complete_error = np.sum(stat_error)
+    print(complete_error)
 
 def parse_args():
     parser = optparse.OptionParser(description='parsing sstat analysis args')
