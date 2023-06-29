@@ -1,6 +1,10 @@
 """
+A metric system for measuring the fit of proposed params
+via summary statistics
+Needs work.
+
 Author: Sara Mathieson, Rebecca Riley
-Date 06/22/2023
+Date 06/28/2023
 """
 import numpy as np
 import optparse
@@ -11,6 +15,7 @@ from ss_helpers import stats_all
 from util import process_opts
 
 NUM_TRIAL = 100
+NUM_BINS = 10
 
 def main():
     # setup --------------------------------------------------------------------
@@ -40,40 +45,103 @@ def main():
     num_pop = len(sample_sizes)
     assert num_pop == 1 # TODO multipop
 
-    real_stats_pop = stats_all(real_matrices, real_matrices_region)
-    sim_stats_pop = stats_all(sim_matrices, sim_matrices_region)
+    truth_values_stats = stats_all(real_matrices, real_matrices_region)
+    exp_values_stats = stats_all(sim_matrices, sim_matrices_region)
 
     # difference calculation -------------------------------------------------
     # pop_sfs, pop_dist, pop_ld, Tajima's D, pi, and num_haplotypes
-    def mse(truth, exp):
-        return (truth - exp) ** 2
 
-    num_stats = len(real_stats_pop)
+    num_stats = len(truth_values_stats)
     stat_error = np.zeros((num_stats))
 
     for i in range(num_stats):
-        truth_values = real_stats_pop[i]
-        exp_values = sim_stats_pop[i]
-        
-        for j in range(len(truth_values)):
-            if i == 0 or i == 2: # these are multi-layered
-                truth_values2 = np.sort(truth_values[j])
-                exp_values2 = np.sort(exp_values[j])
-                for k in range(len(truth_values2)):
-                    stat_error[i] += mse(truth_values2[k], exp_values2[k])
-            else:
-                truth_values2 = np.sort(truth_values)
-                exp_values2 = np.sort(exp_values)
-                stat_error[i] += mse(truth_values2[j], exp_values2[j])
+        truth_values = truth_values_stats[i]
+        exp_values = exp_values_stats[i]
 
+        stat_error[i] = calculate_binned_error(truth_values, exp_values, i)
+
+    print("\n\n")
     result = ""
     for i in range(num_stats):
         # print(stat_error[i])
-        result = result + str(stat_error[i] / NUM_TRIAL) + "\t"
+        result = result + str(stat_error[i]) + "\t"
     print(result)
 
-    complete_error = np.sum(stat_error)
+    complete_error = np.sum(stat_error) / num_stats
     print(complete_error)
+
+def error2(truth, exp):
+    if truth == 0.:
+        return 0.
+
+    return (truth - exp) ** 2 / truth ** 2
+
+def binned_error(n, truth, exp):
+    bin_size = n // NUM_BINS
+    truth_values_sorted = np.sort(truth)
+    bin_maxes = [float('inf') for j in range(NUM_BINS)]
+
+    for j in range(NUM_BINS-1):
+        bin_maxes[j] = truth_values_sorted[(j+1)*bin_size]
+
+    truth_bin_counts = [0 for k in range(NUM_BINS)]
+    bin_pointer = 0
+
+    for j in range(n):
+        while truth_values_sorted[j] >= bin_maxes[bin_pointer]:
+            bin_pointer += 1
+
+        truth_bin_counts[bin_pointer] += 1
+
+    exp_bin_counts = [0 for k in range(NUM_BINS)]
+    bin_pointer = 0
+    exp_values_sorted = np.sort(exp)
+
+    for j in range(n):
+        while exp_values_sorted[j] >= bin_maxes[bin_pointer]:
+            bin_pointer += 1
+
+        exp_bin_counts[bin_pointer] += 1
+
+    error_sum = 0.
+    for j in range(NUM_BINS):
+        error_sum += error2(truth_bin_counts[j], exp_bin_counts[j])
+    
+    return error_sum / NUM_BINS
+
+def calculate_binned_error(truth_values, exp_values, i):
+    N = len(truth_values)
+    assert N == len(exp_values)
+
+    if i == 0 or i == 2:
+        total_error = 0.
+        for j in range(N):
+            total_error += binned_error(len(truth_values), 
+                truth_values[j], exp_values[j])
+        return total_error / N
+
+    # else
+    return binned_error(N, truth_values, exp_values)
+    
+
+def calculate_mse(truth_values, exp_values, i):
+    def mse(truth, exp):
+        return (truth - exp) ** 2
+
+    stat_error_value = 0.
+
+    for j in range(len(truth_values)):
+        if i == 0 or i == 2: # these are multi-layered
+            truth_values2 = np.sort(truth_values[j])
+            exp_values2 = np.sort(exp_values[j])
+            for k in range(len(truth_values2)):
+                stat_error_value += mse(truth_values2[k], exp_values2[k])
+        else:
+            truth_values2 = np.sort(truth_values)
+            exp_values2 = np.sort(exp_values)
+            stat_error_value += mse(truth_values2[j], exp_values2[j])
+
+    return stat_error_value
 
 def parse_args():
     parser = optparse.OptionParser(description='parsing sstat analysis args')
