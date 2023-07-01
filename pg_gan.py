@@ -56,7 +56,8 @@ def main():
     # simulated annealing
     else:
         posterior, loss_lst = simulated_annealing(generator, disc,
-            iterator, iterable_params, opts.seed, toy=opts.toy)
+            iterator, iterable_params, opts.seed, toy=opts.toy, 
+            mut_est=opts.mut_est)
 
     print(posterior)
     print(loss_lst)
@@ -66,7 +67,7 @@ def main():
 ################################################################################
 
 def simulated_annealing(generator, disc, iterator, iterable_params, seed,
-    toy=False):
+    toy=False, mut_est=False):
     """Main function that drives GAN updates"""
 
     # main object for pg-gan
@@ -79,6 +80,13 @@ def simulated_annealing(generator, disc, iterator, iterable_params, seed,
         pg_gan.disc_pretraining(1) # for testing purposes
         s_current = iterable_params.clone(start=True)
         pg_gan.generator.update_params(s_current)
+
+    if mut_est:
+        pg_gan.mut_estimator =  util.mutation_rate_regression(generator)
+        print("using mutation rate estimation")
+    else:
+        pg_gan.mut_estimator = None
+        print("using default mutation rate (1.25e-8)")
 
     loss_curr = pg_gan.generator_loss(s_current)
     print("params, loss", s_current, loss_curr)
@@ -93,6 +101,8 @@ def simulated_annealing(generator, disc, iterator, iterable_params, seed,
     # for toy example
     if toy:
         num_iter = 2
+
+    mutation_rates = None
 
     s_current_set = s_current.param_set
 
@@ -116,7 +126,7 @@ def simulated_annealing(generator, disc, iterator, iterable_params, seed,
                 # can update all the parameters at once, or choose one at a time
                 # s_proposal.proposal_all(multiplier=T, value_dict=parameters.param_set)
                 s_proposal.propose_param(param_name, value, T)
-                loss_proposal = pg_gan.generator_loss(s_proposal)
+                loss_proposal = pg_gan.generator_loss(s_proposal, mutation_rates)
 
                 print(j, "proposal", s_proposal, loss_proposal)
                 if loss_proposal < loss_best: # minimizing loss
@@ -137,7 +147,7 @@ def simulated_annealing(generator, disc, iterator, iterable_params, seed,
             s_current = s_best
             generator.update_params(s_current)
             # train only if accept
-            real_acc, fake_acc = pg_gan.train_sa(NUM_BATCH)
+            real_acc, fake_acc, mutation_rates = pg_gan.train_sa(NUM_BATCH)
             loss_curr = loss_best
 
         # don't retrain
@@ -148,6 +158,11 @@ def simulated_annealing(generator, disc, iterator, iterable_params, seed,
         print(T, p_accept, rand, s_current, loss_curr)
         posterior.append(s_current.to_list())
         loss_lst.append(loss_curr)
+
+        if pg_gan.mut_estimator:
+            print("\nBonus training:")
+            bonus_trained = util.mutation_rate_regression(generator, num_trials=600)
+            print("\n") # separator for printing from mutation_rate_regression
 
     return posterior, loss_lst
 
@@ -197,6 +212,7 @@ class PG_GAN:
         self.discriminator = disc
         self.iterator = iterator # for training data (real or simulated)
         self.iterable_params = iterable_params
+        self.mut_estimator = None # updated after params update
 
         # this checks and prints the model (1 is for the batch size)
         self.discriminator.build_graph((1, iterator.num_samples,
@@ -217,7 +233,7 @@ class PG_GAN:
             s_trial = self.iterable_params.clone(start=True)
             print("trial", k+1, s_trial)
             self.generator.update_params(s_trial)
-            real_acc, fake_acc = self.train_sa(num_batches)
+            real_acc, fake_acc, _ = self.train_sa(num_batches)
             avg_acc = (real_acc + fake_acc)/2
             if avg_acc > max_acc:
                 max_acc = avg_acc
@@ -233,8 +249,13 @@ class PG_GAN:
 
         for epoch in range(num_batches):
 
-            real_regions = self.iterator.real_batch(neg1 = True)
-            real_acc, fake_acc, disc_loss = self.train_step(real_regions)
+            real_regions, snp_rates = self.iterator.real_batch(neg1 = True)
+
+            mutation_rates = self.mut_estimator.predict(snp_rates) \
+                if self.mut_estimator else None
+
+            real_acc, fake_acc, disc_loss = self.train_step(real_regions, \
+                mutation_rates = mutation_rates)
 
             if (epoch+1) % 100 == 0:
                 template = 'Epoch {}, Loss: {}, Real Acc: {}, Fake Acc: {}'
@@ -243,11 +264,12 @@ class PG_GAN:
                                 real_acc/global_vars.BATCH_SIZE * 100,
                                 fake_acc/global_vars.BATCH_SIZE * 100))
 
-        return real_acc/global_vars.BATCH_SIZE, fake_acc/global_vars.BATCH_SIZE
+        return real_acc/global_vars.BATCH_SIZE, fake_acc/global_vars.BATCH_SIZE, mutation_rates
 
-    def generator_loss(self, proposed_params):
+    def generator_loss(self, proposed_params, mutation_rates=None):
         """ Generator loss """
-        generated_regions = self.generator.simulate_batch(params=proposed_params)
+        generated_regions, _ = self.generator.simulate_batch(\
+            params=proposed_params, mutation_rates=mutation_rates)
         # not training when we use the discriminator here
         fake_output = self.discriminator(generated_regions, training=False)
         loss = self.cross_entropy(tf.ones_like(fake_output), fake_output)
@@ -272,12 +294,12 @@ class PG_GAN:
 
         return total_loss, real_acc, fake_acc
 
-    def train_step(self, real_regions):
+    def train_step(self, real_regions, mutation_rates=None):
         """One mini-batch for the discriminator"""
 
         with tf.GradientTape() as disc_tape:
             # use current params
-            generated_regions = self.generator.simulate_batch()
+            generated_regions, _ = self.generator.simulate_batch(mutation_rates=mutation_rates)
 
             real_output = self.discriminator(real_regions, training=True)
             fake_output = self.discriminator(generated_regions, training=True)

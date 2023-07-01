@@ -17,12 +17,12 @@ FRAC_TEST = 0.1 # depricated
 OVERWRITE_TRIAL_DATA = False
 TRIAL_DATA = { 'model': 'const', 'params': 'Ne', 'data_h5': None,
                'bed_file': None, 'reco_folder': None, 'param_values': '10000.',
-               'seed': None, 'sample_sizes': '198'}
+               'seed': None, 'sample_sizes': '198', 'reg_x': None, 'reg_y': None}
 
 # section C: summary stats customization----------------------------------------
 SS_SHOW_TITLE = False
 
-COLOR_DICT = {"YRI": "darkorange","CEU": "blue","CHB": "green", "MXL": "red",
+COLOR_DICT = {"YRI": "darkorange", "CEU": "blue","CHB": "green", "MXL": "red",
               "simulation": "gray", "msprime": "purple"}
 
 SS_LABELS = []

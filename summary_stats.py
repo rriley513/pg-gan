@@ -44,8 +44,9 @@ def main():
         value_strs = global_vars.TRIAL_DATA['param_values'].split(',')
         param_values = [float(value_str) for value_str in value_strs]
         assert len(param_values) == len(in_file_data['params'].split(','))
+        reg_x, reg_y = in_file_data['reg_x'], in_file_data['reg_y']
     else:
-        param_values, in_file_data = ss_helpers.parse_output(input_file)
+        param_values, reg_x, reg_y, in_file_data = ss_helpers.parse_output(input_file)
 
     opts, param_values = util.parse_args(in_file_data = in_file_data,
         param_values=param_values)
@@ -80,14 +81,24 @@ def main():
     '''
 
     # real
-    real_matrices = iterator.real_batch(batch_size=NUM_TRIAL, neg1=False)
-    real_matrices_region = iterator.real_batch(batch_size=NUM_TRIAL, neg1=False,
-        region_len=True)
+    real_matrices, snp_counts_matrices = \
+        iterator.real_batch(batch_size=NUM_TRIAL, neg1=False)
+    real_matrices_region, snp_counts_region = \
+        iterator.real_batch(batch_size=NUM_TRIAL, neg1=False, region_len=True)
+
+    # mutation rate estimation
+    if reg_x:
+        mut_rates_matrices, mut_rates_region = \
+            get_mut_rates(reg_x, reg_y, snp_counts_matrices, snp_counts_region)
+    else:
+        print("using default mutation rate")
+        mut_rates_matrices, mut_rates_region = None, None
 
     # sim
-    sim_matrices = generator.simulate_batch(batch_size=NUM_TRIAL, neg1=False)
-    sim_matrices_region = generator.simulate_batch(batch_size=NUM_TRIAL,
-        neg1=False, region_len=True)
+    sim_matrices, _ = generator.simulate_batch(batch_size=NUM_TRIAL, neg1=False, 
+        mutation_rates=mut_rates_matrices)
+    sim_matrices_region, _ = generator.simulate_batch(batch_size=NUM_TRIAL,
+        neg1=False, region_len=True, mutation_rates=mut_rates_region)
 
     num_pop = len(sample_sizes)
 
@@ -289,5 +300,22 @@ def get_title_from_trial_data(opts, param_values, sample_sizes):
         s_param_values + "\n" + s_source + "\n"
 
     return {"size": FONT_SIZE, "title": title}
+
+def get_mut_rates(reg_x, reg_y, snp_counts_matrices, snp_counts_region):
+    print("using mutation rate estimation: x =", reg_x, ", y =", reg_y)
+    assert(snp_counts_matrices.shape == snp_counts_region.shape)
+    shape = snp_counts_matrices.shape
+
+    mut_rates_matrices = np.zeros(shape)
+    mut_rates_region = np.zeros(shape)
+
+    reg_x = float(reg_x)
+    reg_y = float(reg_y)
+
+    for i in range(shape[0]):
+        mut_rates_matrices[i][0] = reg_x * snp_counts_matrices[i][0] + reg_y
+        mut_rates_region[i][0] = reg_x * snp_counts_region[i][0] + reg_y
+
+    return mut_rates_matrices, mut_rates_region
 
 main()

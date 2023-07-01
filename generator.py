@@ -38,7 +38,8 @@ class Generator:
             self.prior, self.weights = [], []
 
     def simulate_batch(self, batch_size=global_vars.BATCH_SIZE, params=[], 
-        region_len=False, real=False, neg1=True):
+        region_len=False, real=False, neg1=True, mutation_rates=None):
+        snp_rates = np.zeros((batch_size, 1))
 
         # initialize 4D matrix (two channels for distances)
         if region_len:
@@ -56,20 +57,63 @@ class Generator:
         else:
             sim_params.update(params)
 
+        default_mut = sim_params.get("mut")
+
         # simulate each region
         for i in range(batch_size):
-            seed = self.rng.integers(1,high=2**32) # like GAN "noise"
+            if mutation_rates is not None:
+                region, num_snps = self.mut_est_region(sim_params, mutation_rates[i], 
+                    neg1, region_len, default_mut)
+            else:
+                seed = self.rng.integers(1,high=2**32) # like GAN "noise"
 
-            ts = self.simulator(sim_params, self.sample_sizes, seed,
-                self.get_reco(sim_params.get("reco")))
-            region = prep_region(ts, neg1, region_len=region_len)
+                ts = self.simulator(sim_params, self.sample_sizes, seed,
+                    self.get_reco(sim_params.get("reco")))
+                num_snps = ts.genotype_matrix().astype(float).shape[0]
+                region, _ = prep_region(ts, neg1, region_len=region_len)
 
             if region_len:
                 regions.append(region)
             else:
                 regions[i] = region
+            snp_rates[i] = num_snps/global_vars.L
 
-        return regions
+        return regions, snp_rates
+
+    def mut_est_region(self, sim_params, proposed_mut, neg1, region_len, default_mut):
+        if proposed_mut > 0: # sometimes due to XL regions, get negative estimated mut_rate
+            mut_rate = proposed_mut
+        else:
+            mut_rate = default_mut
+        sim_params.param_set["mut"].value = mut_rate
+
+        sufficient_snps = False
+        tries = 0
+        while not sufficient_snps and tries < 10:
+            seed = self.rng.integers(1,high=2**32) # like GAN "noise"
+            tries += 1
+            ts = self.simulator(sim_params, self.sample_sizes, seed, \
+                self.get_reco(sim_params.get("reco")))
+            gt_matrix = ts.genotype_matrix().astype(float)
+            num_snps = gt_matrix.shape[0]
+
+            if num_snps > 0:
+                region, sufficient_snps = prep_region(ts, neg1, region_len)
+
+        if not sufficient_snps and tries == 10:
+            # let assertion error happen at this point. It shouldn't be that common.
+
+            print("WARNING: NOT ENOUGH SNPS, USING DEFAULT MUTATION RATE (" + \
+                  str(sim_params.mut.value) + ")")
+            sim_params.mut.value = default_mut
+            ts = self.simulator(sim_params, self.sample_sizes, seed, \
+                reco=self.get_reco(sim_params.get("reco")))
+            gt_matrix = ts.genotype_matrix().astype(float)
+            num_snps = gt_matrix.shape[0]
+            assert num_snps > 0
+            region, _ = prep_region(gt_matrix, ts.variants(), neg1, region_len)
+
+        return region, num_snps
 
     def real_batch(self, batch_size = global_vars.BATCH_SIZE, neg1=True,
         region_len=False):

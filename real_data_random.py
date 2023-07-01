@@ -175,64 +175,82 @@ class RealDataRandomIterator:
 
         return i # exclusive
 
-    def real_region(self, neg1, region_len):
-        # inclusive
+    def real_region(self, neg1, region_len, return_num_snps=False):
+        # inclusive start, exclusive end
         start_idx = self.rng.integers(0, self.num_snps - global_vars.NUM_SNPS)
 
-        if region_len:
-            end_idx = self.find_end(start_idx)
-            if end_idx == -1:
-                return self.real_region(neg1, region_len) # try again
+        if return_num_snps:
+            start_idx, end_idx_len = self.get_end_idx_len(start_idx)
+            end_idx_S = get_end_idx_S(start_idx)
+        elif region_len:
+            start_idx, end_idx_len = self.get_end_idx_len(start_idx)
+            end_idx_S = end_idx_len
         else:
-            end_idx = start_idx + global_vars.NUM_SNPS # exclusive
+            end_idx_S =  get_end_idx_S(start_idx)
+            end_idx_len = end_idx_S
 
         # make sure we don't span two chroms
         start_chrom = self.chrom_all[start_idx]
-        end_chrom = self.chrom_all[end_idx-1] # inclusive here
+        end_chrom = self.chrom_all[end_idx_S-1] # inclusive here
 
         if start_chrom != end_chrom:
             #print("bad chrom", start_chrom, end_chrom)
             return self.real_region(neg1, region_len) # try again
 
-        hap_data = self.haps_all[start_idx:end_idx, :]
+        hap_data = self.haps_all[start_idx:end_idx_S, :]
         start_base = self.pos_all[start_idx]
-        end_base = self.pos_all[end_idx]
-        positions = self.pos_all[start_idx:end_idx]
+
+        end_base_len = self.pos_all[end_idx_len]
+        end_base_S = self.pos_all[end_idx_S]
+
+        positions_len = self.pos_all[start_idx:end_idx_len]
+        positions_S = self.pos_all[start_idx:end_idx_S]
 
         chrom = global_vars.parse_chrom(start_chrom)
-        region = Region(chrom, start_base, end_base)
+        region = Region(chrom, start_base, end_base_S)
         result = region.inside_mask(self.mask_dict)
 
         # if we do have an accessible region
         if result:
             # if region_len, then positions_S is actually positions_len
-            dist_vec = [0] + [(positions[j+1] - positions[j])/global_vars.L
-                for j in range(len(positions)-1)]
+            dist_vec = [0] + [(positions_S[j+1] - positions_S[j])/global_vars.L
+                for j in range(len(positions_S)-1)]
 
-            after = util.process_gt_dist(hap_data, dist_vec,
+            after, _ = util.process_gt_dist(hap_data, dist_vec,
                 region_len=region_len, real=True, neg1=neg1)
-            return after
+
+            snp_rate = len(positions_len)/(end_base_len - start_base)
+
+            return after, snp_rate
 
         # try again if not in accessible region
         return self.real_region(neg1, region_len)
 
     def real_batch(self, batch_size = global_vars.BATCH_SIZE, neg1=True,
-        region_len=False):
+        region_len=False, return_num_snps=False):
         """Use region_len=True for fixed region length, not by SNPs"""
+
+        snp_rates = np.zeros((batch_size, 1))
 
         if not region_len:
             regions = np.zeros((batch_size, self.num_samples,
                 global_vars.NUM_SNPS, 2), dtype=np.float32)
 
             for i in range(batch_size):
-                regions[i] = self.real_region(neg1, region_len)
+                region, snp_rate = self.real_region(neg1, region_len, 
+                    return_num_snps)
+                regions[i] = region
+                snp_rates[i] = snp_rate
 
         else:
             regions = []
             for i in range(batch_size):
-                regions.append(self.real_region(neg1, region_len))
+                region, snp_rate = self.real_region(neg1, region_len, 
+                    return_num_snps)
+                regions.append(region)
+                snp_rates[i] = snp_rate
 
-        return regions
+        return regions, snp_rates
 
     def real_chrom(self, chrom, samples):
         """Mostly used for msmc - gather all data for a given chrom int"""
@@ -252,6 +270,15 @@ class RealDataRandomIterator:
         assert len(hap_data) == len(positions)
 
         return hap_data.transpose(), positions
+
+    def get_end_idx_len(self, start_idx):
+        end_idx_len = self.find_end(start_idx)
+        while end_idx_len == -1:
+            start_idx = self.rng.integers(0, self.num_snps - global_vars.NUM_SNPS)
+            end_idx_len = self.find_end(start_idx)
+        return start_idx, end_idx_len
+
+get_end_idx_S = lambda start_idx : start_idx + global_vars.NUM_SNPS
 
 if __name__ == "__main__":
     # testing

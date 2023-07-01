@@ -194,7 +194,7 @@ class ParamSet:
         new_params = iterable_params.param_set
 
         for key in new_params:
-            self.param_set[key] = new_params[key]
+            self.param_set[key].value = new_params[key].value
 
     def get(self, param_name):
         return self.param_set[param_name].value

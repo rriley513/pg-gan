@@ -58,6 +58,7 @@ def parse_output(filename, return_acc=False):
     num_param = None
 
     trial_data = {}
+    xs, ys = [], []
 
     for line in f:
 
@@ -88,6 +89,12 @@ def parse_output(filename, return_acc=False):
             real_acc_lst.append(real_acc)
             fake_acc_lst.append(fake_acc)
 
+        elif "REGRESSION" in line:
+            tokens = line.split()
+            if len(tokens) > 6:
+                xs.append(tokens[4])
+                ys.append(tokens[6])
+
         if "T, p_accept" in line:
             tokens = line.split()
             # parse current params and add to each list
@@ -98,11 +105,17 @@ def parse_output(filename, return_acc=False):
 
     # Use -1 instead of iter for the last iteration
     final_params = [param_lst_all[i][-1] for i in range(num_param)]
+
+    if xs == []:
+        final_x, final_y = None, None
+    else:
+        final_x, final_y = xs[-1], ys[-1]
+
     if return_acc:
         return final_params, disc_loss_lst, real_acc_lst, fake_acc_lst, \
-            trial_data
+            final_x, final_y, trial_data
     else:
-        return final_params, trial_data
+        return final_params, final_x, final_y, trial_data
 
 ################################################################################
 # COMPUTE STATS

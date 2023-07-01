@@ -7,6 +7,7 @@ Date: 9/27/22
 # python imports
 import numpy as np
 import optparse
+from sklearn.linear_model import LinearRegression
 import sys
 
 # our imports
@@ -79,6 +80,7 @@ def process_gt_dist(gt_matrix, dist_vec, region_len=False, real=False,
 
     # enough SNPs, take middle portion
     if mid >= half_S:
+        sufficient_snps = True
         minor = major_minor(gt_matrix[mid-half_S:mid+
             other_half_S,:].transpose(), neg1)
         region[:,:,0] = minor
@@ -88,6 +90,7 @@ def process_gt_dist(gt_matrix, dist_vec, region_len=False, real=False,
 
     # not enough SNPs, need to center-pad
     else:
+        sufficient_snps = False
         print("NOT ENOUGH SNPS", num_SNPs)
         print(num_SNPs, S, mid, half_S)
         minor = major_minor(gt_matrix.transpose(), neg1)
@@ -95,7 +98,7 @@ def process_gt_dist(gt_matrix, dist_vec, region_len=False, real=False,
         distances = np.vstack([np.copy(dist_vec) for k in range(n)])
         region[:,half_S-mid:half_S-mid+num_SNPs,1] = distances
 
-    return region # n X SNPs X 2
+    return region, sufficient_snps # n X SNPs X 2
 
 def major_minor(matrix, neg1):
     """Note that matrix.shape[1] may not be S if we don't have enough SNPs"""
@@ -146,6 +149,8 @@ def parse_args(in_file_data = None, param_values = None):
         help='comma separated sample sizes for each population, in haps')
     parser.add_option('-v', '--param_values', type='string',
         help='comma separated values corresponding to params')
+    parser.add_option('--mut_est', action="store_true", dest="mut_est",
+        help='enable mutation rate estimation')
 
     (opts, args) = parser.parse_args()
 
@@ -319,6 +324,46 @@ def process_opts(opts, summary_stats = False):
             opts.seed) # don't need reco_folder
 
     return gen, iterator, iterable_params, sample_sizes # last used for disc.
+
+'''
+Returns a regression between a random mutation rate and the number of SNPs
+in a region generated using the given params and the random mutation rate.
+For obtaining more realistic mutation rate values. Regression score (R^2)
+averages 90% in trials.
+'''
+MUT_MIN = 1.e-9
+MUT_MAX = 1.e-7
+
+def mutation_rate_regression(generator, num_trials = 50, num_subtrials = 3):
+    get_rand_mut = lambda: generator.rng.random()*(MUT_MAX - MUT_MIN) + MUT_MIN
+    simulator = generator.simulator
+
+    params = ParamSet(simulator)
+    params.update(generator.iterable_params)
+
+    mutation_rates = np.zeros((num_trials * num_subtrials)) # y
+    snp_rates = np.zeros((num_trials * num_subtrials, 1)) # X
+    for i in range(0, num_trials, num_subtrials):
+        # random mutation rate
+        # mutation_rate = np.random.uniform(params.mut.min, params.mut.max)
+        mutation_rate = get_rand_mut()
+        params.param_set["mut"].value = mutation_rate
+        # generate corresponding region(s)
+        for j in range(num_subtrials):
+            ts = simulator(params, generator.sample_sizes,\
+                                     seed = generator.rng.integers(1,high=2**32),
+                                     reco = generator.get_reco(params.get("reco")))
+            # store results
+            mutation_rates[i + j] = mutation_rate
+            # any ts has a length equal to globals.L, so we use that val directly
+            snp_rates[i + j] = len([variant for variant in ts.variants()]) / global_vars.L
+
+    # calculate regression
+    reg = LinearRegression().fit(snp_rates, mutation_rates)
+    print("REGRESSION SCORE: " + str(reg.score(snp_rates, \
+          mutation_rates)) + "\tx: " + str(reg.coef_[0]) + \
+          "\ty: " + str(reg.intercept_))
+    return reg
 
 if __name__ == "__main__":
     # test major/minor and post-processing
