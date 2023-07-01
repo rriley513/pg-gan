@@ -245,3 +245,65 @@ def ooa3(params, sample_sizes, seed, reco):
     ts = engine.simulate(model, contig, samples, seed=seed)
 
     return ts
+
+"""
+TODO: validate as a match and edit as needed
+"""
+def admix(params, sample_sizes, seed, reco):
+    """Note this is a 1 population model with ghost 2 pops"""
+    assert len(sample_sizes) == 1
+
+    ancestral_size = params.get("N1")
+    population_split = params.get("T1")
+    CEU_size = params.get("N2")
+    AMR_size = params.get("N3")
+    admix_proportion = 0.5
+    admix_time = params.get("T_admix") # same as growth time
+    pre_growth_size = CEU_size + AMR_size
+    growth = params.get("growth")
+    N0_post_growth = pre_growth_size / math.exp(-growth* admix_time)
+
+    empty_pop_size = 1e-10 # very small number
+
+    population_configurations = [
+        msprime.PopulationConfiguration(\
+            sample_size=sample_sizes[0], initial_size = N0_post_growth), # MXL
+        msprime.PopulationConfiguration(\
+            sample_size=0, initial_size = empty_pop_size), # Admix into MXL
+        msprime.PopulationConfiguration(sample_size=0, \
+            initial_size = empty_pop_size)] # ancestral pop
+
+    demographic_events = [
+        # exp growth -- growing
+        msprime.PopulationParametersChange(time=0, initial_size=N0_post_growth, \
+            growth_rate=growth, population_id = 0),
+        # turn off growth
+        msprime.PopulationParametersChange(time=admix_time, \
+            initial_size=pre_growth_size, growth_rate=0, population_id = 0),
+
+        # admix event
+        msprime.MassMigration(time=admix_time, source=0, dest=1, proportion=admix_proportion),
+        msprime.PopulationParametersChange(time=admix_time, \
+            initial_size = CEU_size, population_id = 0),
+        msprime.PopulationParametersChange(time=admix_time, \
+            initial_size = AMR_size, population_id = 1),
+
+        # return to ancestral pop
+        msprime.MassMigration(time=population_split, source=0, dest=2, proportion=1.),
+        msprime.MassMigration(time=population_split, source=1, dest=2, proportion=1.),
+        msprime.PopulationParametersChange(time=population_split, \
+            initial_size = empty_pop_size, population_id = 0),
+        msprime.PopulationParametersChange(time=population_split, \
+            initial_size = empty_pop_size, population_id = 1),
+        msprime.PopulationParametersChange(time=population_split, \
+            initial_size = ancestral_size, population_id = 2)
+	]
+
+    ts = msprime.simulate(population_configurations = population_configurations,
+		demographic_events = demographic_events,
+		mutation_rate = params.get("mut"),
+		length = global_vars.L,
+		recombination_rate = reco,
+        random_seed = seed)
+
+    return ts

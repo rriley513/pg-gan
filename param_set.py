@@ -136,6 +136,16 @@ class ParamSet:
             param_set["m_AF_AS"] = Parameter(1.9e-5, 0.0, 0.01, "m_AF_AS")
             param_set["m_EU_AS"] = Parameter(9.6e-5, 0.0, 0.01, "m_EU_AS")
 
+        # admix
+        elif simulator == simulation.admix:
+            # didn't perform well as an interable param
+            param_set["T_admix"] = Parameter(12, 0, 16, "T_admix")
+            param_set["N1"] = Parameter(9000, 1000, 30000, "N1")
+            param_set["N2"] = Parameter(5000, 1000, 30000, "N2")
+            param_set["N3"] = Parameter(12000, 1000, 30000, "N3")
+            param_set["T1"] = Parameter(2000, 1500, 5000, "T1")
+            param_set["growth"] = Parameter(0.005, 0.0, 0.05, "growth")
+
         else:
             sys.exit(str(simulator) + " not supported")
 
